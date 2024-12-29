@@ -5,8 +5,8 @@ from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 from ..database import Base
 from ..main import app
-from ..models import Todos
-
+from ..models import Todos, Users
+from ..routers.auth import bcrypt_context
 
 DATABASE_URL = "postgresql://postgres:123456@localhost:5432/TodoApplicationDatabaseTest"
 
@@ -35,13 +35,23 @@ client = TestClient(app)
 
 @pytest.fixture()
 def test_user():
+    user = Users(
+        username="test_user",
+        email="test_user@example.com",
+        first_name="test_first_name",
+        last_name="test_last_name",
+        hashed_password=bcrypt_context.hash("password"),
+        role="admin",
+        phone_number="(111)-111-1111"
+    )
     db = TestingSessionLocal()
-    db.execute(text("INSERT INTO users (id, username) VALUES (1, 'test_user')"))
+    db.add(user)
     db.commit()
-    yield {'id': 1, 'username': 'test_user'}
-    db.execute(text("DELETE FROM users;"))
-    db.execute(text("ALTER SEQUENCE users_id_seq RESTART WITH 1;"))
-    db.commit()
+    yield user
+    with engine.connect() as con:
+        con.execute(text("DELETE FROM users;"))
+        con.execute(text("ALTER SEQUENCE users_id_seq RESTART WITH 1;"))
+        con.commit()
 
 
 @pytest.fixture()
