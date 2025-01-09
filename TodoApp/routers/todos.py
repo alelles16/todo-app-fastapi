@@ -2,11 +2,16 @@ from typing import Annotated
 from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from starlette import status
 from .auth import get_current_user
 from ..database import SessionLocal
 from ..models import Todos
+from starlette.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+templates = Jinja2Templates(directory="TodoApp/templates")
+
 
 router = APIRouter(
     prefix='/todos',
@@ -25,6 +30,35 @@ db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
 
+def redirect_to_login():
+    redirect_response = RedirectResponse(url='/auth/login-page', status_code=status.HTTP_302_FOUND)
+    redirect_response.delete_cookie(key='access_token')
+    return redirect_response
+
+
+### Pages ###
+
+@router.get("/todo-page")
+async def render_todo_page(request: Request, db: db_dependency):
+    try:
+        user = await get_current_user(request.cookies.get('access_token'))
+        if user is None:
+            return redirect_to_login()
+        todos = db.query(Todos).filter(Todos.owner == user.get('id')).all()
+        return templates.TemplateResponse("todos.html", {"request": request, "todos": todos, "user": user})
+    except Exception as e:
+        return redirect_to_login()
+
+
+### Endpoints ###
+
+class TodoRequest(BaseModel):
+    title: str = Field(min_length=3)
+    description: str = Field(min_length=3, max_length=100)
+    priority: int = Field(gt=0, le=5)
+    complete: bool
+
+
 @router.get('/', status_code=status.HTTP_200_OK)
 async def read_all(user: user_dependency, db: db_dependency):
     return db.query(Todos).filter(Todos.owner == user.get('id')).all()
@@ -39,13 +73,6 @@ async def read_todo(user: user_dependency, db: db_dependency, todo_id: int = Pat
     if todo_model is not None:
         return todo_model
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Todo not found.')
-
-
-class TodoRequest(BaseModel):
-    title: str = Field(min_length=3)
-    description: str = Field(min_length=3, max_length=100)
-    priority: int = Field(gt=0, le=5)
-    complete: bool
 
 
 @router.post('/todo', status_code=status.HTTP_201_CREATED)
